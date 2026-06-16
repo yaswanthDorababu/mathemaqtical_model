@@ -1,0 +1,1242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Math3D | Shader-Based Visuals</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://polyfill-fastly.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        body { margin: 0; background-color: #121212; color: #e0e0e0; overflow: hidden; font-family: 'Inter', -apple-system, sans-serif; }
+        .glass { 
+            background: rgba(24, 24, 27, 0.95); 
+            backdrop-filter: blur(10px); 
+            border: 1px solid rgba(255, 255, 255, 0.05); 
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+        .math-gradient {
+            background: linear-gradient(to right, #60a5fa, #34d399);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        /* AI Chat UI Styles */
+        #ai-assistant {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            width: 350px;
+            max-height: 500px;
+            display: flex;
+            flex-direction: column;
+            z-index: 50;
+        }
+        #ai-assistant.hidden {
+            transform: translateY(20px);
+            opacity: 0;
+            pointer-events: none;
+        }
+        .chat-scroll {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255,255,255,0.1) transparent;
+        }
+        .ai-bubble { background: rgba(30, 41, 59, 0.8); border-top-left-radius: 2px; }
+        .user-bubble { background: #2563eb; border-top-right-radius: 2px; }
+        #gui-container { position: absolute; top: 1rem; right: 1rem; z-index: 20; }
+    </style>
+</head>
+<body>
+
+    <!-- Main GUI -->
+    <div class="fixed top-0 left-0 w-80 h-full p-6 z-10 pointer-events-none">
+        <div class="glass p-6 rounded-3xl h-full pointer-events-auto flex flex-col shadow-2xl">
+            <div class="flex flex-col gap-1 mb-6">
+                <div class="flex items-center gap-2">
+                    <h1 class="text-xl font-medium tracking-tight border-l-4 border-blue-500 pl-3">Visual <span class="text-blue-400">Proof</span></h1>
+                </div>
+                <p class="text-[10px] text-slate-500 mt-1 uppercase tracking-widest">Mathematical Geometry Lab</p>
+            </div>
+
+            <nav class="space-y-4 overflow-y-auto flex-1 pr-2">
+                <!-- Navigation Tabs -->
+                <div class="flex gap-1 bg-black/20 p-1 rounded-lg border border-white/5">
+                    <button id="tab-lab" onclick="switchTab('visual')" class="flex-1 py-1.5 text-[10px] font-bold rounded-md bg-white/10">THEOREMS</button>
+                    <button id="tab-graph" onclick="switchTab('graph')" class="flex-1 py-1.5 text-[10px] font-bold rounded-md hover:bg-white/5">GRAPHS</button>
+                </div>
+
+                <!-- Interaction Modes -->
+                <div class="flex gap-1 bg-blue-500/10 p-1 rounded-lg border border-blue-500/20">
+                    <button onclick="setInteractionMode('view')" title="Orbit Camera [V]" id="mode-view" class="flex-1 py-1 text-[9px] font-bold rounded bg-blue-600 text-white">VIEW</button>
+                    <button onclick="setInteractionMode('move')" title="Move Shapes [M]" id="mode-move" class="flex-1 py-1 text-[9px] font-bold rounded hover:bg-white/5 text-slate-400">MOVE</button>
+                    <button onclick="setInteractionMode('rotate')" title="Rotate Shapes [R]" id="mode-rotate" class="flex-1 py-1 text-[9px] font-bold rounded hover:bg-white/5 text-slate-400">ROTATE</button>
+                    <button onclick="setInteractionMode('cut')" title="Remove Piece [C]" id="mode-cut" class="flex-1 py-1 text-[9px] font-bold rounded hover:bg-white/5 text-slate-400">CUT</button>
+                </div>
+
+                <div class="p-4 bg-white/5 border border-white/10 rounded-xl">
+                    <div class="flex justify-between items-center mb-2">
+                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Generative Prompt</p>
+                        <div id="prompt-strength" class="flex gap-0.5">
+                            <div class="w-2 h-1 bg-slate-700 rounded-full"></div>
+                            <div class="w-2 h-1 bg-slate-700 rounded-full"></div>
+                            <div class="w-2 h-1 bg-slate-700 rounded-full"></div>
+                        </div>
+                    </div>
+                    <textarea id="mainCommand" 
+                        oninput="updatePromptStrength()"
+                        placeholder="Imagine a mathematical concept... (e.g., 'A huge rotating emerald torus with high density')" 
+                        class="w-full bg-black/40 border border-white/10 rounded-lg p-3 text-xs outline-none focus:border-blue-500 min-h-[100px] text-white resize-none leading-relaxed"></textarea>
+                    <button id="drawBtn" onclick="executeCommand()" class="w-full mt-3 py-2.5 bg-white text-black rounded-lg text-[10px] font-bold tracking-widest uppercase hover:bg-blue-400 transition-colors flex items-center justify-center gap-2">
+                        <span>Generate Visualization</span>
+                    </button>
+                </div>
+
+                <div id="activeDesignInfo" class="hidden animate-fade-in">
+                    <h2 id="designTitle" class="text-xs font-bold text-white uppercase mb-1"></h2>
+                    <div id="designMeta" class="p-3 bg-white/5 rounded-lg border border-white/5 text-[10px] text-slate-400 leading-relaxed"></div>
+                </div>
+            </nav>
+
+            <div class="pt-6 mt-auto border-t border-white/5">
+                <div class="grid grid-cols-2 gap-2">
+                    <a href="query_generator.html" class="py-2 bg-white/5 rounded-lg text-[9px] font-bold text-center border border-white/10 hover:bg-white/10">AI LAB</a>
+                    <a href="theorems_reference.html" class="py-2 bg-white/5 rounded-lg text-[9px] font-bold text-center border border-white/10 hover:bg-white/10">REFERENCE</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Graphing Lab Overlay -->
+    <div id="graph-lab" class="fixed inset-0 z-30 bg-slate-950 hidden p-20">
+        <div class="glass w-full h-full rounded-3xl p-8 flex flex-col">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold">Interactive Graphing</h2>
+                <button onclick="switchTab('visual')" class="text-slate-400 hover:text-white">Close [Esc]</button>
+            </div>
+            <div class="grid grid-cols-4 gap-6 flex-1">
+                <div class="col-span-1 space-y-4">
+                    <label class="text-xs font-bold text-slate-500">Equation (e.g., y = x^2)</label>
+                    <input id="graphQuery" type="text" class="w-full bg-slate-900 border border-slate-800 p-4 rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
+                    <button onclick="updateGraph()" class="w-full py-4 bg-emerald-600 rounded-xl font-bold">Plot Function</button>
+                </div>
+                <div id="plot-container" class="col-span-3 bg-black/40 rounded-2xl border border-white/5"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Tutor Button -->
+    <button onclick="toggleAiAssistant()" class="fixed bottom-8 right-8 w-14 h-14 bg-blue-600 rounded-full z-40 shadow-xl flex items-center justify-center border-2 border-white/20">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+        </svg>
+    </button>
+
+    <!-- AI Assistant Panel -->
+    <div id="ai-assistant" class="glass rounded-3xl overflow-hidden hidden">
+        <div class="p-4 border-b border-white/10 flex justify-between items-center bg-blue-600/20">
+            <div class="flex items-center gap-2">
+                <div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                <span class="text-xs font-bold uppercase tracking-wider">Math AI Tutor</span>
+            </div>
+            <button onclick="toggleAiAssistant()" class="text-slate-400 hover:text-white">×</button>
+        </div>
+        <div id="chat-history" class="p-4 h-80 overflow-y-auto chat-scroll space-y-4 text-xs">
+            <div class="ai-bubble p-3 rounded-2xl">
+                Hello! I'm your AI Math Agent. Ask me anything about the <span id="ai-current-focus" class="text-blue-400 font-bold">Torus</span> visualization!
+            </div>
+        </div>
+        <div class="p-4 border-t border-white/10 flex gap-2">
+            <input type="text" id="ai-input" placeholder="How does this work?..." class="flex-1 bg-slate-800 rounded-xl p-2 text-xs outline-none focus:ring-1 focus:ring-blue-500">
+            <button onclick="handleAiQuery()" class="bg-blue-600 p-2 rounded-xl hover:bg-blue-500">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <div id="gui-container"></div>
+    <div id="canvas-container" class="w-full h-full"></div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { TransformControls } from 'three/addons/controls/TransformControls.js';
+        import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+
+        // --- SHADER DEFINITIONS ---
+        // This shader creates a procedural grid that stays consistent regardless of shape distance
+        const vertexShader = `
+            varying vec2 vUv;
+            varying vec3 vNormal;
+            void main() {
+                vUv = uv;
+                vNormal = normalize(normalMatrix * normal);
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+
+        const fragmentShader = `
+            uniform float uTime;
+            uniform vec3 uFillColor;
+            uniform vec3 uLineColor;
+            uniform float uGridScale;
+            uniform bool uShowGrid;
+            uniform float uOpacity;
+            varying vec2 vUv;
+            varying vec3 vNormal;
+
+            void main() {
+                // Clean schematic shading
+                float light = dot(vNormal, normalize(vec3(1.0, 1.0, 1.0))) * 0.5 + 0.5;
+                
+                vec3 finalColor = uFillColor * (0.6 + 0.4 * light);
+
+                if(uShowGrid) {
+                    vec2 grid = fract(vUv * uGridScale);
+                    float line = min(grid.x, grid.y);
+                    line = step(0.05, line);
+                    finalColor = mix(uLineColor, finalColor, line);
+                }
+
+                gl_FragColor = vec4(finalColor, uOpacity);
+            }
+        `;
+
+        let scene, camera, renderer, controls, transformControls, gui, material, raycaster, mouse;
+        let currentMesh, currentGroup;
+
+        // Global Visual Config
+        const visualConfig = {
+            fillColor: '#4f46e5',
+            lineColor: '#a5b4fc',
+            gridScale: 10.0,
+            showGrid: true,
+            autoRotate: false,
+            posX: 0,
+            posY: 0,
+            posZ: 0,
+            rotX: 0,
+            rotY: 0,
+            rotZ: 0,
+            interactionMode: 'view' // view, arrange, cut
+        };
+
+        const MATH_DATA = {
+            torus: {
+                title: "Torus Topology",
+                formula: "x = (R + r \\cos \\theta) \\cos \\phi",
+                desc: "A surface of revolution generated by revolving a circle in 3D space.",
+                params: { radius: 2, tube: 0.7 },
+                generate: (p) => {
+                    const group = new THREE.Group();
+                    group.add(new THREE.Mesh(new THREE.TorusGeometry(p.radius, p.tube, 32, 100), material));
+                    group.add(createLabel(`R = ${p.radius}`, new THREE.Vector3(0, p.radius + p.tube + 1, 0)));
+                    group.add(createLabel(`r = ${p.tube}`, new THREE.Vector3(p.radius + 1, 0, 0)));
+                    return group;
+                }
+            },
+            pythagoras: {
+                title: "Pythagorean Theorem",
+                formula: "a^2 + b^2 = c^2",
+                desc: "Geometric proof showing side relationships in right triangles.",
+                params: { a: 3, b: 4 },
+                generate: (p) => setupPythagoras(p.a, p.b)
+            },
+            circle: {
+                title: "Circle",
+                formula: "A = \\pi r^2",
+                desc: "A set of all points in a plane that are at a given distance from a center.",
+                params: { radius: 3 },
+                generate: (p) => {
+                    const group = new THREE.Group();
+                    group.add(new THREE.Mesh(new THREE.CircleGeometry(p.radius, 64), material));
+                    group.add(createLabel(`r = ${p.radius}`, new THREE.Vector3(p.radius + 0.5, 0, 0)));
+                    return group;
+                }
+            },
+            rectangle: {
+                title: "Rectangle",
+                formula: "Area = w \\times h",
+                desc: "A quadrilateral with four right angles.",
+                params: { width: 6, height: 4 },
+                generate: (p) => {
+                    const group = new THREE.Group();
+                    group.add(new THREE.Mesh(new THREE.PlaneGeometry(p.width, p.height), material));
+                    group.add(createLabel(`w=${p.width}`, new THREE.Vector3(0, -p.height/2 - 0.5, 0)));
+                    group.add(createLabel(`h=${p.height}`, new THREE.Vector3(p.width/2 + 0.5, 0, 0)));
+                    return group;
+                }
+            },
+            rhombus: {
+                title: "Rhombus",
+                formula: "Area = \\frac{1}{2} d_1 d_2",
+                desc: "A quadrilateral with all four sides of equal length.",
+                params: { side: 4, angle: 60 },
+                generate: (p) => {
+                    const rad = (p.angle * Math.PI) / 180;
+                    const shape = new THREE.Shape();
+                    shape.moveTo(0, 0);
+                    shape.lineTo(p.side, 0);
+                    shape.lineTo(p.side + Math.cos(rad) * p.side, Math.sin(rad) * p.side);
+                    shape.lineTo(Math.cos(rad) * p.side, Math.sin(rad) * p.side);
+                    shape.closePath();
+                    const geo = new THREE.ShapeGeometry(shape);
+                    geo.center();
+                    return new THREE.Mesh(geo, material);
+                }
+            },
+            parallelogram: {
+                title: "Parallelogram",
+                formula: "Area = b \\times h",
+                desc: "A quadrilateral with two pairs of parallel sides.",
+                params: { base: 6, height: 4, offset: 2 },
+                generate: (p) => {
+                    const shape = new THREE.Shape();
+                    shape.moveTo(0, 0);
+                    shape.lineTo(p.base, 0);
+                    shape.lineTo(p.base + p.offset, p.height);
+                    shape.lineTo(p.offset, p.height);
+                    shape.closePath();
+                    const geo = new THREE.ShapeGeometry(shape);
+                    geo.center();
+                    return new THREE.Mesh(geo, material);
+                }
+            },
+            trapezoid: {
+                title: "Trapezoid",
+                formula: "Area = \\frac{a+b}{2}h",
+                desc: "A quadrilateral with at least one pair of parallel sides.",
+                params: { top: 4, bottom: 8, height: 4 },
+                generate: (p) => {
+                    const shape = new THREE.Shape();
+                    const diff = (p.bottom - p.top) / 2;
+                    shape.moveTo(0, 0);
+                    shape.lineTo(p.bottom, 0);
+                    shape.lineTo(p.bottom - diff, p.height);
+                    shape.lineTo(diff, p.height);
+                    shape.closePath();
+                    const geo = new THREE.ShapeGeometry(shape);
+                    geo.center();
+                    return new THREE.Mesh(geo, material);
+                }
+            },
+            // 1D SHAPES
+            line: {
+                title: "Line Segment",
+                formula: "L = \\sqrt{(x_2-x_1)^2 + (y_2-y_1)^2}",
+                desc: "A 1D object representing the shortest distance between two points.",
+                params: { length: 5 },
+                generate: (p) => {
+                    const group = new THREE.Group();
+                    const mat = new THREE.LineBasicMaterial({ color: '#ffffff' });
+                    const points = [new THREE.Vector3(-p.length/2, 0, 0), new THREE.Vector3(p.length/2, 0, 0)];
+                    const geo = new THREE.BufferGeometry().setFromPoints(points);
+                    group.add(new THREE.Line(geo, mat));
+                    group.add(createLabel(`L = ${p.length}`, new THREE.Vector3(0, 0.5, 0)));
+                    return group;
+                }
+            },
+            spiral: {
+                title: "Archimedean Spiral",
+                formula: "r = a + b\\theta",
+                desc: "A curve generated by a point moving away from a fixed point at a constant speed.",
+                params: { turns: 5, growth: 0.2 },
+                generate: (p) => {
+                    const points = [];
+                    for(let i=0; i < p.turns * 50; i++) {
+                        const t = i / 10;
+                        const r = p.growth * t;
+                        points.push(new THREE.Vector3(Math.cos(t)*r, Math.sin(t)*r, 0));
+                    }
+                    const geo = new THREE.BufferGeometry().setFromPoints(points);
+                    return new THREE.Line(geo, new THREE.LineBasicMaterial({color: '#ffffff'}));
+                }
+            },
+            // 2D POLYGONS
+            polygon: {
+                title: "Regular Polygon",
+                formula: "Area = \\frac{1}{2} n s r",
+                desc: "A closed 2D shape with n equal sides and angles.",
+                params: { sides: 5, radius: 3 },
+                generate: (p) => {
+                    const group = new THREE.Group();
+                    group.add(new THREE.Mesh(new THREE.CircleGeometry(p.radius, Math.floor(p.sides)), material));
+                    group.add(createLabel(`n = ${Math.floor(p.sides)}`, new THREE.Vector3(0, p.radius + 1, 0)));
+                    return group;
+                }
+            },
+            ellipse: {
+                title: "Ellipse",
+                formula: "\\frac{x^2}{a^2} + \\frac{y^2}{b^2} = 1",
+                desc: "A plane curve surrounding two focal points.",
+                params: { a: 4, b: 2 },
+                generate: (p) => {
+                    const curve = new THREE.EllipseCurve(0, 0, p.a, p.b, 0, 2*Math.PI, false, 0);
+                    const points = curve.getPoints(50);
+                    const shape = new THREE.Shape(points);
+                    return new THREE.Mesh(new THREE.ShapeGeometry(shape), material);
+                }
+            },
+            heart: {
+                title: "Heart Curve (Cardioid)",
+                formula: "r = a(1 - \\sin\\theta)",
+                desc: "A mathematical curve shaped like a heart.",
+                params: { scale: 2 },
+                generate: (p) => {
+                    const shape = new THREE.Shape();
+                    shape.moveTo(0, 0);
+                    shape.bezierCurveTo(0, 0, -1, 1, -1, 2);
+                    shape.bezierCurveTo(-1, 3.5, 1, 3.5, 1, 2);
+                    shape.bezierCurveTo(1, 1, 0, 0, 0, 0);
+                    const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape), material);
+                    mesh.scale.set(p.scale, p.scale, p.scale);
+                    return mesh;
+                }
+            },
+            triangle: {
+                title: "3D Triangular Prism",
+                formula: "V = \\frac{1}{2} b h d",
+                desc: "A 3D triangular prism generated by extruding a triangle.",
+                params: { base: 4, height: 4, depth: 2 },
+                generate: (p) => {
+                    const shape = new THREE.Shape();
+                    shape.moveTo(-p.base/2, -p.height/2);
+                    shape.lineTo(p.base/2, -p.height/2);
+                    shape.lineTo(0, p.height/2);
+                    shape.closePath();
+                    const geo = new THREE.ExtrudeGeometry(shape, { depth: p.depth, bevelEnabled: false });
+                    geo.center();
+                    const group = new THREE.Group();
+                    group.add(new THREE.Mesh(geo, material));
+                    group.add(createLabel(`b = ${p.base}`, new THREE.Vector3(0, -p.height/2 - 1, 0)));
+                    group.add(createLabel(`h = ${p.height}`, new THREE.Vector3(p.base/2 + 1, 0, 0)));
+                    group.add(createLabel(`d = ${p.depth}`, new THREE.Vector3(0, 0, p.depth/2 + 1)));
+                    return group;
+                }
+            },
+            sphere: {
+                title: "Sphere Geometry",
+                formula: "x^2 + y^2 + z^2 = r^2",
+                desc: "The set of all points in 3D space at a fixed distance from a center.",
+                params: { radius: 3 },
+                generate: (p) => {
+                    const group = new THREE.Group();
+                    group.add(new THREE.Mesh(new THREE.SphereGeometry(p.radius, 32, 32), material));
+                    group.add(createLabel(`r = ${p.radius}`, new THREE.Vector3(p.radius + 1, 0, 0)));
+                    return group;
+                }
+            },
+            cube: {
+                title: "Hexahedron (Cube)",
+                formula: "V = s^3",
+                desc: "A regular solid with six congruent square faces.",
+                params: { size: 4 },
+                generate: (p) => {
+                    const group = new THREE.Group();
+                    group.add(new THREE.Mesh(new THREE.BoxGeometry(p.size, p.size, p.size), material));
+                    group.add(createLabel(`s = ${p.size}`, new THREE.Vector3(p.size/2 + 1, p.size/2 + 1, 0)));
+                    return group;
+                }
+            },
+            square: {
+                title: "Square Plane",
+                formula: "Area = s^2",
+                desc: "A 2D regular quadrilateral with four equal sides.",
+                params: { side: 4 },
+                generate: (p) => {
+                    const group = new THREE.Group();
+                    group.add(new THREE.Mesh(new THREE.PlaneGeometry(p.side, p.side), material));
+                    group.add(createLabel(`s = ${p.side}`, new THREE.Vector3(p.side/2 + 1, 0, 0)));
+                    return group;
+                }
+            },
+            cylinder: {
+                title: "Cylinder",
+                formula: "V = \\pi r^2 h",
+                desc: "A surface consisting of all the points on all the lines which are parallel to a given line.",
+                params: { radius: 2, height: 5 },
+                generate: (p) => {
+                    const group = new THREE.Group();
+                    group.add(new THREE.Mesh(new THREE.CylinderGeometry(p.radius, p.radius, p.height, 32), material));
+                    group.add(createLabel(`r = ${p.radius}`, new THREE.Vector3(p.radius + 1, 0, 0)));
+                    group.add(createLabel(`h = ${p.height}`, new THREE.Vector3(0, p.height/2 + 1, 0)));
+                    return group;
+                }
+            },
+            cone: {
+                title: "Cone",
+                formula: "V = \\frac{1}{3}\\pi r^2 h",
+                desc: "A 3D shape that tapers smoothly from a flat base to a point called the apex.",
+                params: { radius: 3, height: 6 },
+                generate: (p) => {
+                    const group = new THREE.Group();
+                    group.add(new THREE.Mesh(new THREE.ConeGeometry(p.radius, p.height, 32), material));
+                    return group;
+                }
+            },
+            pyramid: {
+                title: "Square Pyramid",
+                formula: "V = \\frac{1}{3}bh",
+                desc: "A polyhedron formed by connecting a polygonal base and a point, called the apex.",
+                params: { radius: 3, height: 5 },
+                generate: (p) => {
+                    const group = new THREE.Group();
+                    group.add(new THREE.Mesh(new THREE.ConeGeometry(p.radius, p.height, 4), material));
+                    group.add(createLabel(`r = ${p.radius}`, new THREE.Vector3(p.radius + 1, -p.height/2, 0)));
+                    group.add(createLabel(`h = ${p.height}`, new THREE.Vector3(0, p.height/2 + 1, 0)));
+                    return group;
+                }
+            },
+            wave: {
+                title: "Sine Wave Surface",
+                formula: "z = \\sin(\\sqrt{x^2 + y^2})",
+                desc: "A mathematical surface representing propagation of waves in 2D space.",
+                params: { frequency: 1 },
+                generate: (p) => {
+                    const geo = new THREE.PlaneGeometry(10, 10, 100, 100);
+                    applyWaveDeformation(geo, p.frequency);
+                    const group = new THREE.Group();
+                    group.add(new THREE.Mesh(geo, material));
+                    return group;
+                }
+            },
+            archimedes: {
+                title: "Archimedes' Proof",
+                formula: "V_{sphere} = \\frac{2}{3} V_{cylinder}",
+                desc: "The ratio of the volume of a sphere to its circumscribed cylinder is 2:3.",
+                params: { radius: 3 },
+                generate: (p) => setupArchimedes(p.radius)
+            },
+            platonic: {
+                title: "Platonic Solids",
+                formula: "V - E + F = 2",
+                desc: "Switch types: 4:Tetra, 6:Cube, 8:Octa, 12:Dodeca, 20:Icosa",
+                params: { faces: 12, radius: 3 },
+                generate: (p) => {
+                    let geo;
+                    if(p.faces <= 4) geo = new THREE.TetrahedronGeometry(p.radius);
+                    else if(p.faces <= 6) geo = new THREE.BoxGeometry(p.radius, p.radius, p.radius);
+                    else if(p.faces <= 8) geo = new THREE.OctahedronGeometry(p.radius);
+                    else if(p.faces <= 12) geo = new THREE.DodecahedronGeometry(p.radius);
+                    else geo = new THREE.IcosahedronGeometry(p.radius);
+                    return new THREE.Mesh(geo, material);
+                }
+            },
+            tesseract: {
+                title: "4D Tesseract Projection",
+                formula: "x^2 + y^2 + z^2 + w^2 = r^2",
+                desc: "The 4D analog of a cube, projected into 3D space.",
+                params: { scale: 3 },
+                generate: (p) => {
+                    const group = new THREE.Group();
+                    const inner = new THREE.Mesh(new THREE.BoxGeometry(p.scale, p.scale, p.scale), material.clone());
+                    inner.material.transparent = true; inner.material.opacity = 0.4;
+                    const outer = new THREE.Mesh(new THREE.BoxGeometry(p.scale*2, p.scale*2, p.scale*2), material.clone());
+                    outer.material.wireframe = true;
+                    group.add(inner, outer);
+                    return group;
+                }
+            }
+        };
+
+        // Keep track of the currently loaded theorem's parameters
+        let activeParams = {};
+        let activeKey = 'torus';
+
+        // Tab Switching
+        window.switchTab = function(tab) {
+            document.getElementById('graph-lab').classList.add('hidden');
+            if (tab === 'graph') {
+                document.getElementById('graph-lab').classList.remove('hidden');
+                updateGraph();
+            }
+            if (tab === 'exam') {
+                window.location.href = 'theorems_reference.html#eamcet';
+            }
+        }
+
+        window.setInteractionMode = function(mode) {
+            visualConfig.interactionMode = mode;
+            
+            // Update UI buttons
+            ['view', 'move', 'rotate', 'cut'].forEach(m => {
+                const btn = document.getElementById(`mode-${m}`);
+                if (btn) btn.className = `flex-1 py-1 text-[9px] font-bold rounded ${m === mode ? 'bg-blue-600 text-white' : 'hover:bg-white/5 text-slate-400'}`;
+            });
+
+            // Reset Transform Controls
+            if (transformControls) {
+                transformControls.detach();
+                if (mode === 'move') transformControls.setMode('translate');
+                if (mode === 'rotate') transformControls.setMode('rotate');
+            }
+            
+            // Enable/Disable OrbitControls depending on mode
+            if (controls) controls.enabled = (mode === 'view');
+
+            // Remove surface grid lines during interaction for better visibility and technical clarity
+            const showGrid = (mode === 'view');
+            scene.traverse(node => {
+                if (node.isMesh && node.material.uniforms && node.material.uniforms.uShowGrid) {
+                    node.material.uniforms.uShowGrid.value = showGrid ? visualConfig.showGrid : false;
+                }
+            });
+        }
+
+        // Keyboard Shortcuts for Cursor Workflow
+        window.addEventListener('keydown', (e) => {
+            if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+            
+            const key = e.key.toLowerCase();
+            if (key === 'v') setInteractionMode('view');
+            if (key === 'm') setInteractionMode('move');
+            if (key === 'r') setInteractionMode('rotate');
+            if (key === 'c') setInteractionMode('cut');
+        });
+
+        function updateGraph() {
+            const query = document.getElementById('graphQuery').value || 'x^2';
+            const xValues = [], yValues = [];
+            for(let x = -10; x <= 10; x += 0.1) {
+                xValues.push(x);
+                yValues.push(eval(query.replace(/x/g, `(${x})`).replace(/\^/g, '**')));
+            }
+            Plotly.newPlot('plot-container', [{
+                x: xValues, y: yValues, 
+                line: {color: '#3b82f6', width: 3},
+                fill: 'tozeroy', fillcolor: 'rgba(59, 130, 246, 0.1)'
+            }], { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: {color: '#94a3b8'}, margin: {t:20} });
+        }
+
+        // Mouse Rotation State
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+
+        init();
+
+        function init() {
+            scene = new THREE.Scene(); 
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(6, 6, 8);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+
+            // Transform Controls for Rearranging
+            transformControls = new TransformControls(camera, renderer.domElement);
+            transformControls.addEventListener('dragging-changed', (event) => {
+                controls.enabled = !event.value;
+            });
+            scene.add(transformControls);
+
+            // Raycaster for selecting shapes
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            // Shader Material
+            material = new THREE.ShaderMaterial({
+                vertexShader,
+                fragmentShader,
+                uniforms: {
+                    uTime: { value: 0 },
+                    uFillColor: { value: new THREE.Color(visualConfig.fillColor) },
+                    uLineColor: { value: new THREE.Color(visualConfig.lineColor) },
+                    uGridScale: { value: visualConfig.gridScale },
+                    uShowGrid: { value: visualConfig.showGrid },
+                    uOpacity: { value: 1.0 }
+                },
+                side: THREE.DoubleSide
+            });
+
+            loadTheorem('torus');
+            animate();
+
+            window.addEventListener('resize', onWindowResize);
+
+            // Mouse interaction for object rotation
+            renderer.domElement.addEventListener('pointerdown', (e) => {
+                if (e.button !== 0) return; 
+
+                // Raycasting logic for Arrange and Cut modes
+                if (visualConfig.interactionMode !== 'view') {
+                    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+                    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+                    raycaster.setFromCamera(mouse, camera);
+
+                    const target = currentMesh || currentGroup;
+                    if (target) {
+                        const intersects = raycaster.intersectObjects(target.children.length > 0 ? target.children : [target], true);
+                        
+                        if (intersects.length > 0) {
+                            let selected = intersects[0].object;
+                            // Traverse up to find the top-level group child
+                            while (selected.parent && selected.parent !== target && selected.parent !== scene) {
+                                selected = selected.parent;
+                            }
+
+                            if (visualConfig.interactionMode === 'move' || visualConfig.interactionMode === 'rotate') {
+                                transformControls.attach(selected);
+                            } else if (visualConfig.interactionMode === 'cut') {
+                                if (target instanceof THREE.Group) {
+                                    target.remove(selected);
+                                    document.getElementById('designMeta').innerText = "AI Update: Piece removed via manual cut.";
+                                } else {
+                                    clearWorkspace();
+                                }
+                                if (transformControls.object === selected) transformControls.detach();
+                            }
+                            return; // Stop here if we interacted with an object
+                        }
+                    }
+                    // Clicked background - detach tools
+                    if (transformControls) transformControls.detach();
+                }
+
+                isDragging = (visualConfig.interactionMode === 'view');
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            });
+
+            window.addEventListener('pointermove', (e) => {
+                if (!isDragging) return;
+
+                const deltaMove = {
+                    x: e.clientX - previousMousePosition.x,
+                    y: e.clientY - previousMousePosition.y
+                };
+
+                const target = currentMesh || currentGroup;
+                if (target) {
+                    const rotationSpeed = 0.005;
+                    target.rotation.y += deltaMove.x * rotationSpeed;
+                    target.rotation.x += deltaMove.y * rotationSpeed;
+
+                    // Sync back to config for persistence and GUI update
+                    visualConfig.rotX = target.rotation.x;
+                    visualConfig.rotY = target.rotation.y;
+
+                    // Update GUI Transformation folder if it exists
+                    if (gui) {
+                        const transformFolder = gui.folders.find(f => f._title === 'Transformation');
+                        if (transformFolder) {
+                            transformFolder.controllers.forEach(c => {
+                                if (c._name && c._name.includes('Rotation')) c.updateDisplay();
+                            });
+                        }
+                    }
+                }
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            });
+
+            window.addEventListener('pointerup', () => {
+                isDragging = false;
+            });
+        }
+
+        function renderTheoremList() {
+            const list = document.getElementById('theoremList');
+            list.innerHTML = '';
+            Object.keys(MATH_DATA).forEach(key => {
+                const btn = document.createElement('button');
+                btn.className = "px-3 py-1 bg-slate-800 hover:bg-blue-600 rounded-full text-[10px] font-bold transition-all border border-slate-700";
+                btn.innerText = MATH_DATA[key].title;
+                btn.onclick = () => loadTheorem(key);
+                list.appendChild(btn);
+            });
+        }
+
+        window.updatePromptStrength = function() {
+            const val = document.getElementById('mainCommand').value;
+            const bars = document.getElementById('prompt-strength').children;
+            const score = Math.min(Math.floor(val.length / 20), 3);
+            
+            for(let i=0; i<bars.length; i++) {
+                bars[i].className = i < score ? 'w-2 h-1 bg-blue-500 rounded-full' : 'w-2 h-1 bg-slate-700 rounded-full';
+            }
+        }
+
+        window.executeCommand = function() {
+            const cmd = document.getElementById('mainCommand').value.toLowerCase();
+            const btn = document.getElementById('drawBtn');
+            const originalText = btn.innerHTML;
+            
+            // AI Interpretation State
+            btn.disabled = true;
+            btn.innerHTML = `<svg class="animate-spin h-3 w-3 text-black" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> <span>AI Interpreting...</span>`;
+
+            const keys = Object.keys(MATH_DATA);
+            const aliases = {
+                'rect': 'rectangle', 'box': 'cube', 'circ': 'circle', 
+                'tri': 'triangle', 'tringle': 'triangle', 'quad': 'square', 'rhomb': 'rhombus',
+                'para': 'parallelogram', 'trap': 'trapezoid', 'cone': 'cone',
+                'ball': 'sphere', 'donut': 'torus', 'piramid': 'pyramid', 'pyramids': 'pyramid'
+            };
+
+            // Enhanced Detection: Supports counts like "3 cubes" or "two spheres"
+            let shapeInstances = [];
+            let coveredParts = "";
+            const numMap = { 'a': 1, 'an': 1, 'one':1, 'two':2, 'three':3, 'four':4, 'five':5 };
+            const countRegex = /(\d+|one|two|three|four|five)\s+([a-z]+)/g;
+            let match;
+            while ((match = countRegex.exec(cmd)) !== null) {
+                const count = isNaN(match[1]) ? numMap[match[1]] : parseInt(match[1]);
+                const word = match[2].replace(/s$/, ''); // simple singularization
+                const key = keys.find(k => word.includes(k)) || aliases[Object.keys(aliases).find(a => word.includes(a))];
+                if (key) {
+                    for(let i=0; i<count; i++) shapeInstances.push(key);
+                    coveredParts += match[0] + " ";
+                }
+            }
+
+            // Add shapes mentioned without explicit counts
+            keys.forEach(k => { 
+                if (cmd.includes(k) && !coveredParts.includes(k)) {
+                    shapeInstances.push(k);
+                    coveredParts += k + " ";
+                }
+            });
+            Object.entries(aliases).forEach(([alias, target]) => {
+                if (cmd.includes(alias) && !coveredParts.includes(alias) && !coveredParts.includes(target)) {
+                    shapeInstances.push(target);
+                    coveredParts += alias + " " + target + " ";
+                }
+            });
+            
+            if (shapeInstances.length === 0) {
+                shapeInstances = keys.filter(k => cmd.includes(k)).slice(0, 1);
+            }
+            
+            setTimeout(() => {
+                // Process Color Imagination
+                const colors = {
+                    'red': '#ef4444', 'blue': '#3b82f6', 'green': '#10b981', 
+                    'emerald': '#10b981', 'purple': '#8b5cf6', 'white': '#ffffff',
+                    'yellow': '#eab308', 'orange': '#f97316', 'cyan': '#06b6d4'
+                };
+                Object.entries(colors).forEach(([name, hex]) => {
+                    if (cmd.includes(name)) visualConfig.fillColor = hex;
+                });
+                
+                // Process Size Imagination
+                let scaleMultiplier = 1.0;
+                if (cmd.includes('huge') || cmd.includes('large') || cmd.includes('big')) scaleMultiplier = 2.0;
+                if (cmd.includes('small') || cmd.includes('tiny')) scaleMultiplier = 0.5;
+
+                // Process Motion Imagination
+                visualConfig.autoRotate = cmd.includes('rotate') || cmd.includes('spin');
+
+                // --- Improved AI Spatial Logic (Intent Analysis) ---
+                let layout = 'row'; // Default: horizontal row
+                // Reorder for priority: specific spatial keywords first
+                if (cmd.includes('on') || cmd.includes('top') || cmd.includes('above') || cmd.includes('up')) layout = 'above';
+                else if (cmd.includes('below') || cmd.includes('under')) layout = 'below';
+                else if (cmd.includes('behind')) layout = 'behind';
+                else if (cmd.includes('front') || cmd.includes('before')) layout = 'front';
+                else if (cmd.includes('inside') || cmd.includes('in') || cmd.includes('nest')) layout = 'nest';
+                else if (cmd.includes('with') || cmd.includes('and')) layout = 'nest';
+                else if (cmd.includes('column') || cmd.includes('vertical')) layout = 'column';
+
+                // Handle Multi-Shape Combinations
+                if (shapeInstances.length > 1) {
+                    clearWorkspace();
+                    const group = new THREE.Group();
+                    let firstObj = null;
+
+                    shapeInstances.forEach((key, idx) => {
+                        const data = MATH_DATA[key];
+                        const obj = data.generate({...data.params});
+                        obj.name = key; // Assign name for GUI identification
+                        obj.scale.set(scaleMultiplier, scaleMultiplier, scaleMultiplier);
+                        
+                        if (idx === 0) {
+                            firstObj = obj;
+                        } else {
+                            const box = new THREE.Box3().setFromObject(firstObj);
+                            const size = new THREE.Vector3();
+                            box.getSize(size);
+
+                            if (layout === 'nest') {
+                                const s = Math.pow(0.7, idx);
+                                obj.scale.multiplyScalar(s);
+                                obj.position.z = idx * 0.3;
+                            } else if (layout === 'above') {
+                                obj.position.y = idx * (size.y + 1);
+                            } else if (layout === 'below') {
+                                obj.position.y = idx * -(size.y + 1);
+                            } else if (layout === 'behind') {
+                                obj.position.z = idx * -(size.z + 1);
+                            } else if (layout === 'front') {
+                                obj.position.z = idx * (size.z + 1);
+                            } else if (layout === 'column') {
+                                obj.position.y = (idx - (shapeInstances.length - 1) / 2) * -(size.y + 2);
+                            } else {
+                                obj.position.x = (idx - (shapeInstances.length - 1) / 2) * (size.x + 2);
+                            }
+                        }
+                        group.add(obj);
+                    });
+
+                    // Apply global transformations to the composite group
+                    group.position.set(visualConfig.posX, visualConfig.posY, visualConfig.posZ);
+                    group.rotation.set(visualConfig.rotX, visualConfig.rotY, visualConfig.rotZ);
+
+                    currentGroup = group;
+                    scene.add(group);
+                    document.getElementById('activeDesignInfo').classList.remove('hidden');
+                    document.getElementById('designTitle').innerText = "AI Composite Concept";
+                    document.getElementById('designMeta').innerText = `AI Analysis: Arranged ${shapeInstances.length} items using a "${layout}" strategy. Multi-shape context: ${shapeInstances.join(', ')}.`;
+                    setupGUI(null);
+                    // After setting up GUI, update its display to reflect initial positions/rotations if any
+                } else if (shapeInstances.length === 1) {
+                    loadTheorem(shapeInstances[0]);
+                    const target = currentMesh || currentGroup;
+                    if(target) target.scale.set(scaleMultiplier, scaleMultiplier, scaleMultiplier);
+                } else {
+                    loadTheorem('torus');
+                }
+
+                // Update Material Colors
+                const updateAllUniforms = (target) => {
+                    target.traverse(node => {
+                        if (node.isMesh && node.material.uniforms) {
+                            const u = node.material.uniforms;
+                            if (u.uFillColor) u.uFillColor.value.set(visualConfig.fillColor);
+                            if (u.uOpacity) u.uOpacity.value = 1.0;
+                        }
+                    });
+                };
+                updateAllUniforms(scene);
+                
+                // Reset UI
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }, 800);
+        };
+
+        window.clearWorkspace = function() {
+            if (currentMesh) scene.remove(currentMesh);
+            if (currentGroup) scene.remove(currentGroup);
+            currentMesh = null; currentGroup = null;
+            document.getElementById('activeDesignInfo').classList.add('hidden');
+        };
+
+        function loadTheorem(key) {
+            if (currentMesh) {
+                scene.remove(currentMesh);
+                currentMesh = null;
+            }
+            if (currentGroup) {
+                scene.remove(currentGroup);
+                currentGroup = null;
+            }
+            activeKey = key;
+
+            if (!MATH_DATA[key]) {
+                return console.error(`Theorem data for "${key}" is missing.`);
+            }
+            
+            const data = MATH_DATA[key];
+
+            document.getElementById('activeDesignInfo').classList.remove('hidden');
+            document.getElementById('designTitle').innerText = data.title;
+            document.getElementById('designMeta').innerText = data.desc;
+
+            // Update AI Context
+            document.getElementById('ai-current-focus').innerText = data.title;
+
+            // Use existing activeParams if we're just updating, otherwise load defaults
+            if (Object.keys(activeParams).length === 0 || !data.params.hasOwnProperty(Object.keys(activeParams)[0])) {
+                activeParams = { ...data.params };
+            }
+            
+            const result = data.generate(activeParams);
+            
+            if (result instanceof THREE.Object3D) {
+                if (result instanceof THREE.Group) {
+                    currentGroup = result;
+                } else {
+                    currentMesh = result;
+                }
+                result.position.set(visualConfig.posX, visualConfig.posY, visualConfig.posZ);
+                result.rotation.set(visualConfig.rotX, visualConfig.rotY, visualConfig.rotZ);
+                scene.add(result);
+            }
+
+            setupGUI(key);
+        }
+
+        function setupPythagoras(a, b) {
+            const group = new THREE.Group();
+            const c = Math.sqrt(a*a + b*b);
+            const angle = Math.atan2(b, a);
+
+            const createBox = (w, h, color, pos, rot = 0) => {
+                const m = material.clone();
+                m.uniforms = THREE.UniformsUtils.clone(material.uniforms);
+                m.uniforms.uFillColor.value.set(color);
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.5), m);
+                mesh.position.copy(pos);
+                mesh.rotation.z = rot;
+                return mesh;
+            };
+
+            group.add(createBox(a, a, '#60a5fa', new THREE.Vector3(a/2, -a/2, 0)));
+            group.add(createBox(b, b, '#34d399', new THREE.Vector3(-b/2, b/2, 0)));
+            
+            const cPos = new THREE.Vector3(
+                a/2 + (Math.cos(angle)*c/2), 
+                b/2 + (Math.sin(angle)*c/2), 
+                0
+            );
+            group.add(createBox(c, c, '#f87171', cPos, angle - Math.PI/2));
+
+            // Add mathematical labels 'a', 'b', and 'c' to the triangle sides
+            group.add(createLabel('a', new THREE.Vector3(a/2, 0.6, 0.6)));
+            group.add(createLabel('b', new THREE.Vector3(0.6, b/2, 0.6)));
+            group.add(createLabel('c', new THREE.Vector3(a/2 - 0.6, b/2 - 0.6, 0.6)));
+
+            return group;
+        }
+
+        function setupArchimedes(radius) {
+            const group = new THREE.Group();
+            const sphereMat = material.clone();
+            sphereMat.uniforms = THREE.UniformsUtils.clone(material.uniforms);
+            sphereMat.uniforms.uFillColor.value.set(0x8b5cf6);
+            const sphere = new THREE.Mesh(new THREE.SphereGeometry(radius, 32, 32), sphereMat);
+            
+            const cylMat = material.clone();
+            cylMat.uniforms = THREE.UniformsUtils.clone(material.uniforms);
+            cylMat.uniforms.uFillColor.value.set(0xffffff);
+            cylMat.uniforms.uOpacity.value = 0.3;
+            cylMat.transparent = true;
+            const cylinder = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, radius * 2, 32, 1, true), cylMat);
+            
+            group.add(sphere, cylinder);
+            return group;
+        }
+
+        function createLabel(text, position) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 128;
+            canvas.height = 128;
+            context.font = 'Bold 80px Inter, Arial, sans-serif';
+            context.fillStyle = 'white';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.shadowColor = 'black';
+            context.shadowBlur = 8;
+            context.fillText(text, 64, 64);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true });
+            const sprite = new THREE.Sprite(spriteMaterial);
+            sprite.position.copy(position);
+            sprite.scale.set(1.5, 1.5, 1);
+            return sprite;
+        }
+
+        function applyWaveDeformation(geometry, freq) {
+            const pos = geometry.attributes.position;
+            for(let i = 0; i < pos.count; i++) {
+                const x = pos.getX(i);
+                const y = pos.getY(i);
+                pos.setZ(i, Math.sin(Math.sqrt(x*x + y*y) * freq));
+            }
+            geometry.rotateX(-Math.PI / 2);
+        }
+
+        function setupGUI(key) {
+            if (gui) gui.destroy();
+            gui = new GUI({ container: document.getElementById('gui-container'), title: 'Visual Controls' });
+            
+            const folderMath = gui.addFolder('Theorem Variables');
+            if (key && activeParams && Object.keys(activeParams).length > 0) { // Check if activeParams has properties
+                Object.keys(activeParams).forEach(pKey => {
+                    folderMath.add(activeParams, pKey, 0.1, 20).onChange(() => {
+                        loadTheorem(activeKey);
+                    });
+                });
+            } else {
+                folderMath.hide(); // Hide if no specific theorem variables or for composite
+            }
+
+            const folderTransform = gui.addFolder('Transformation');
+
+            if (currentGroup && currentGroup.children.length > 1) {
+                // Controls for the entire composite group
+                const groupOverallFolder = folderTransform.addFolder('Group (Overall)');
+                groupOverallFolder.add(visualConfig, 'posX', -10, 10).name('Position X').onChange(v => currentGroup.position.x = v);
+                groupOverallFolder.add(visualConfig, 'posY', -10, 10).name('Position Y').onChange(v => currentGroup.position.y = v);
+                groupOverallFolder.add(visualConfig, 'posZ', -10, 10).name('Position Z').onChange(v => currentGroup.position.z = v);
+                groupOverallFolder.add(visualConfig, 'rotX', 0, Math.PI * 2).name('Rotation X').onChange(v => currentGroup.rotation.x = v);
+                groupOverallFolder.add(visualConfig, 'rotY', 0, Math.PI * 2).name('Rotation Y').onChange(v => currentGroup.rotation.y = v);
+                groupOverallFolder.add(visualConfig, 'rotZ', 0, Math.PI * 2).name('Rotation Z').onChange(v => currentGroup.rotation.z = v);
+
+                // Controls for individual children within the group
+                currentGroup.children.forEach((child, index) => {
+                    // Use child.name if available, otherwise default to type
+                    const childName = child.name && child.name !== '' ? child.name : child.type;
+                    const childFolder = folderTransform.addFolder(`Shape ${index + 1} (${childName})`);
+                    
+                    childFolder.add(child.position, 'x', -10, 10).name('Position X');
+                    childFolder.add(child.position, 'y', -10, 10).name('Position Y');
+                    childFolder.add(child.position, 'z', -10, 10).name('Position Z');
+                    childFolder.add(child.rotation, 'x', 0, Math.PI * 2).name('Rotation X');
+                    childFolder.add(child.rotation, 'y', 0, Math.PI * 2).name('Rotation Y');
+                    childFolder.add(child.rotation, 'z', 0, Math.PI * 2).name('Rotation Z');
+                    childFolder.add(child.scale, 'x', 0.1, 5).name('Scale X');
+                    childFolder.add(child.scale, 'y', 0.1, 5).name('Scale Y');
+                    childFolder.add(child.scale, 'z', 0.1, 5).name('Scale Z');
+                });
+            } else {
+                // Existing controls for single mesh/group
+                folderTransform.add(visualConfig, 'posX', -10, 10).name('Position X').onChange(v => {
+                    if (currentMesh) currentMesh.position.x = v;
+                    if (currentGroup) currentGroup.position.x = v;
+                });
+                folderTransform.add(visualConfig, 'posY', -10, 10).name('Position Y').onChange(v => {
+                    if (currentMesh) currentMesh.position.y = v;
+                    if (currentGroup) currentGroup.position.y = v;
+                });
+                folderTransform.add(visualConfig, 'posZ', -10, 10).name('Position Z').onChange(v => {
+                    if (currentMesh) currentMesh.position.z = v;
+                    if (currentGroup) currentGroup.position.z = v;
+                });
+                folderTransform.add(visualConfig, 'rotX', 0, Math.PI * 2).name('Rotation X').onChange(v => {
+                    if (currentMesh) currentMesh.rotation.x = v;
+                    if (currentGroup) currentGroup.rotation.x = v;
+                });
+                folderTransform.add(visualConfig, 'rotY', 0, Math.PI * 2).name('Rotation Y').onChange(v => {
+                    if (currentMesh) currentMesh.rotation.y = v;
+                    if (currentGroup) currentGroup.rotation.y = v;
+                });
+                folderTransform.add(visualConfig, 'rotZ', 0, Math.PI * 2).name('Rotation Z').onChange(v => {
+                    if (currentMesh) currentMesh.rotation.z = v;
+                    if (currentGroup) currentGroup.rotation.z = v;
+                });
+            }
+
+            const folderStyle = gui.addFolder('Appearance');
+            folderStyle.addColor(visualConfig, 'fillColor').name('Fill Color').onChange(v => {
+                material.uniforms.uFillColor.value.set(v);
+                // Update cloned materials in the scene
+                scene.traverse(node => {
+                    if (node.isMesh && node.material.uniforms && node.material.uniforms.uFillColor) {
+                        node.material.uniforms.uFillColor.value.set(v);
+                    }
+                });
+            });
+            folderStyle.addColor(visualConfig, 'lineColor').name('Line Color').onChange(v => material.uniforms.uLineColor.value.set(v));
+            folderStyle.add(visualConfig, 'gridScale', 5, 200).name('Grid Density').onChange(v => material.uniforms.uGridScale.value = v);
+            folderStyle.add(visualConfig, 'showGrid').name('Show Outline').onChange(v => material.uniforms.uShowGrid.value = v);
+            folderStyle.add(visualConfig, 'autoRotate').name('Auto Rotate');
+        }
+
+        window.toggleGrid = function() {
+            material.uniforms.uShowGrid.value = !material.uniforms.uShowGrid.value;
+        };
+
+        // --- AI AGENT LOGIC ---
+        window.toggleAiAssistant = function() {
+            document.getElementById('ai-assistant').classList.toggle('hidden');
+        }
+
+        window.handleAiQuery = function() {
+            const input = document.getElementById('ai-input');
+            const text = input.value.trim();
+            if (!text) return;
+
+            addChatMessage(text, 'user');
+            input.value = '';
+
+            // Simulate AI "Thinking"
+            setTimeout(() => {
+                const response = generateAiResponse(text, activeKey);
+                addChatMessage(response, 'ai');
+            }, 600);
+        }
+
+        function addChatMessage(text, sender) {
+            const history = document.getElementById('chat-history');
+            const bubble = document.createElement('div');
+            bubble.className = `${sender}-bubble p-3 rounded-2xl animate-fade-in`;
+            bubble.innerText = text;
+            history.appendChild(bubble);
+            history.scrollTop = history.scrollHeight;
+        }
+
+        function generateAiResponse(query, key) {
+            const data = MATH_DATA[key];
+            const q = query.toLowerCase();
+
+            if (q.includes('formula')) return `The formula for ${data.title} is: ${data.formula}`;
+            if (q.includes('how') || q.includes('explain')) return data.desc;
+            if (q.includes('application') || q.includes('use')) {
+                const apps = {
+                    pythagoras: "Used in GPS navigation, construction, and data compression.",
+                    torus: "Found in particle accelerators (Tokamaks) and donut-shaped topology studies.",
+                    sphere: "Essential for astronomy, global mapping, and fluid dynamics.",
+                    wave: "Critical for understanding sound, light, and quantum mechanics."
+                };
+                return `In the real world, this is used in: ${apps[key] || "advanced computational geometry."}`;
+            }
+            if (q.includes('hi') || q.includes('hello')) return "Hello! I'm your Math Tutor. I can explain the math, formula, or real-world uses of what you're seeing.";
+            
+            return `I'm analyzing the ${data.title}. You can try asking about its formula or real-world applications!`;
+        }
+
+        // Global listener for Enter key in chat
+        document.getElementById('ai-input').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                handleAiQuery();
+            }
+        });
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            material.uniforms.uTime.value += 0.01;
+            
+            // Sync time uniform to all child meshes (for cloned materials in groups)
+            const currentTarget = currentMesh || currentGroup;
+            if (currentTarget) {
+                currentTarget.traverse(node => {
+                    if (node.isMesh && node.material.uniforms && node.material.uniforms.uTime) {
+                        node.material.uniforms.uTime.value = material.uniforms.uTime.value;
+                    }
+                });
+            }
+
+            const target = currentMesh || currentGroup;
+            if(visualConfig.autoRotate && !isDragging && target) {
+                target.rotation.y += 0.005;
+                visualConfig.rotY = target.rotation.y;
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
