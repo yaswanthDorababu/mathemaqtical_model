@@ -20,12 +20,6 @@ A comprehensive, chapter-wise formula sheet designed for competitive exam prepar
 *   Interactive tabs for switching between theorems and geometric shape properties.
 *   Clean, "glassmorphism" UI for better readability.
 
-### 4. Personal Portfolio (`portfolio.html`)
-A professional landing page for **Kommisetti Yaswanth Dorababu**, showcasing skills in Cybersecurity, AI, and Web Development, along with featured projects and certifications.
-
-### 5. Cinematic Surprise (`bujjiammabirthday2026.html`)
-A creative implementation of the project's tech stack, featuring a starfield simulation, cinematic text sequences, and interactive "story" cards for a personalized birthday experience.
-
 ## 🛠️ Technology Stack
 
 *   **Graphics:** Three.js (WebGL), Custom GLSL Shaders.
